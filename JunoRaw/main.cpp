@@ -276,14 +276,6 @@ vector<double> AjusteHomography(vector<Point2d> x,vector <Point2d> y,vector<doub
 }
 
 
-double PolyVal(Mat q, double x, double y)
-{
-    double z=0;
-
-    z = q.at<double>(5,0) + q.at<double>(4,0) * y + q.at<double>(3,0)*x+q.at<double>(2,0)*x*y+q.at<double>(1,0)*y*y+q.at<double>(0,0)*x*x;
-//    z = q.at<double>(2,0)+q.at<double>(1,0)*y+q.at<double>(0,0)*x;
-    return z;
-}
 Mat PolyFit( vector<double> z, vector<Point2f> pt ,int n)
 {
 
@@ -320,17 +312,48 @@ public :
     int nbChannel; // Channel used
     int nbFrameLet;
     bool rawFormat;
+    String fileName;
     vector <double> yOc; //y-axis optical center ordinate for channel 
     int xOc;//x-axis optical center  
-    vector<int> gapChannelInf;
-    vector<int> gapChannelSup;
     vector<double> dAngle;
     int nbZone;
     Mat x;
+    vector<Mat> qxRef,qyRef;
+    vector<Mat> h00Ref,h01Ref,h10Ref,h11Ref;
+    vector<vector<bool>> status;
+    vector<int> indFirstValid,indLastValid;
+private :
+    
+public :
+
+
 //http://www.unmannedspaceflight.com/index.php?s=06b9e2696feec057060998762f8be5d8&showtopic=2548&st=465&p=203948&#entry203948
     bool SetMat(Mat a);
 
-    JunoCam() :nbFrameLet(82),focalLength(0.010997), pixelSize(7.4e-6), omega(2 * acos(-1.0) / 30), Ts(0.365)
+    double PolyVal(Mat q, double x, double y)
+    {
+        double z=0;
+        int indFrame=static_cast<int>(y);
+        int indZone=static_cast<int>(x);
+        if (indFrame<status.size() && indFrame>=0 && indZone>=0)
+            if ( indZone<status[indFrame].size() /*&& status[indFrame][indZone]*/)
+                z = q.at<double>(5,0) + q.at<double>(4,0) * y + q.at<double>(3,0)*x+q.at<double>(2,0)*x*y+q.at<double>(1,0)*y*y+q.at<double>(0,0)*x*x;
+            else
+            {
+                if (abs(indZone-indFirstValid[indFrame])<abs(indZone-indLastValid[indFrame]))
+                    x = indFirstValid[indFrame];
+                else
+                    x = indLastValid[indFrame];
+                z = q.at<double>(5,0) + q.at<double>(4,0) * y + q.at<double>(3,0)*x+q.at<double>(2,0)*x*y+q.at<double>(1,0)*y*y+q.at<double>(0,0)*x*x;
+            }
+
+        else
+            z = 0;
+    //    z = q.at<double>(2,0)+q.at<double>(1,0)*y+q.at<double>(0,0)*x;
+        return z;
+    }
+
+   JunoCam() :nbFrameLet(82),focalLength(0.010997), pixelSize(7.4e-6), omega(2 * acos(-1.0) / 30), Ts(0.365)
     {
 //        rawFormat = false; yOc.push_back(3);yOc.push_back(-128);yOc.push_back(-128-128-2);
 //        rawFormat = false; yOc.push_back(0);yOc.push_back(-121);yOc.push_back(-252);
@@ -338,13 +361,72 @@ public :
         rawFormat = false; /*yOc.push_back(766-600);*/;yOc.push_back(611-600);yOc.push_back(456-600);yOc.push_back(291-600);;
 //        rawFormat = false; yOc.push_back(134);yOc.push_back(2);yOc.push_back(-119.5);
         dAngle.push_back(0);dAngle.push_back(0);dAngle.push_back(0);
-        threshStdGr=10;threshStdLevel=3;
+        threshStdGr=10;threshStdLevel=5;
+        ifstream fs;
+        fs.open("refQuadricHomo.txt",ios::in);
+        if (fs.is_open())
+        {
+            Mat qx = Mat::zeros(6,1,CV_64FC1);
+            Mat qy = Mat::zeros(6,1,CV_64FC1);
+            double w;
+            for (int d = 0; d < 3; d++)
+            {
+                for (int c=0;c<6;c++)
+                {
+                    fs>>w;
+                    qx.at<double>(c,0)=w;
+                }
+                for (int c=0;c<6;c++)
+                {
+                    fs>>w;
+                    qy.at<double>(c,0)=w;
+                }
+                qxRef.push_back(qx);
+                qyRef.push_back(qy);
+                cout<<qx<<qy<<endl;
+            }
+            Mat h = Mat::zeros(3,3,CV_64FC1);
+            for (int c=0;c<9;c++)
+            {
+                fs>>w;
+                h.at<double>(c/3,c%3)=w;
+            }
+            cout<<h<<endl;
+            h00Ref.push_back(h);
+            for (int c=0;c<9;c++)
+            {
+                fs>>w;
+                h.at<double>(c/3,c%3)=w;
+            }
+            cout<<h<<endl;
+            h01Ref.push_back(h);
+            for (int c=0;c<9;c++)
+            {
+                fs>>w;
+                h.at<double>(c/3,c%3)=w;
+            }
+            cout<<h<<endl;
+            h10Ref.push_back(h);
+            for (int c=0;c<9;c++)
+            {
+                fs>>w;
+                h.at<double>(c/3,c%3)=w;
+            }
+            cout<<h<<endl;
+            h11Ref.push_back(h);
+
+
+
+        }
 
     }
-    Mat JunoCam::ExtractRaw(int begFrameLet,int lastFrameLet);
+    Mat JunoCam::ExtractRaw(int begFrameLet,int lastFrameLet,bool useCfgFile=false);
+    Mat JunoCam::OldExtractRaw(int begFrameLet,int lastFrameLet,bool useCfgFile=false);
     double LookForSeam(Mat a,Mat b,int seamHeight,int nbZone,vector<Point2f> &h,vector<bool> &status);// h  homography matrix such b(*(x,y)=v)=a for seam. return value is error. a is upper image 
-    Mat MatchChannel(vector<Mat> plandst);
+    Mat MatchChannel(vector<Mat> plandst,bool useCfgFile=false);
     Point MatchTemplate(Mat a,Mat b,Point2f p);
+    void SetFileName(String s){fileName=s;};
+    String GetFileName(){return fileName;};
 };
 
 Point JunoCam::MatchTemplate(Mat a, Mat b,Point2f p)
@@ -354,8 +436,8 @@ Point JunoCam::MatchTemplate(Mat a, Mat b,Point2f p)
     double minx,maxx;
     Point minLoc,maxLoc;
     minMaxLoc(rab,&minx,&maxx,&minLoc,&maxLoc);
-    maxLoc.x=-maxLoc.x+p.x;
-    maxLoc.y=-maxLoc.y+p.y;
+    maxLoc.x=maxLoc.x+p.x;
+    maxLoc.y=maxLoc.y+p.y;
     return maxLoc;
 }
 
@@ -397,8 +479,8 @@ double  JunoCam::LookForSeam(Mat a, Mat b,int seamHeight,    int nbZone, vector<
     
     Mat af,afgx,afgy,bf,bfgx,bfgy,afg,bfg,rab;
     a.convertTo(af,CV_32F);
-    Scharr(a,afgy,CV_32F,0,1);
-    Scharr(a,afgx,CV_32F,1,0);
+//    Scharr(a,afgy,CV_32F,0,1);
+//    Scharr(a,afgx,CV_32F,1,0);
     double reponse;
     char debug=0;
     int windowStep=a.cols/(nbZone+3);
@@ -406,41 +488,50 @@ double  JunoCam::LookForSeam(Mat a, Mat b,int seamHeight,    int nbZone, vector<
     for (int i = 0; i < nbZone; i++)
     {
         errorMin=DBL_MAX;
-        Point2f ps1,ps2,ps3;
+        Point2f ps1,ps2,ps3,ps4;
         b(Rect(i*windowStep,0,windowWidth,seamHeight)).copyTo(bSeam);
         // Gradient match
-        Scharr(bSeam,bfgy,CV_32F,0,1);
-        Scharr(bSeam,bfgx,CV_32F,1,0);
-        ps1 = MatchTemplate(afgx, bfgx, Point2f(i*windowStep,a.rows));
-        ps3 = MatchTemplate(afgy, bfgy, Point2f(i*windowStep,a.rows));
-        meanStdDev(bfgx,meanGr,stdDevGr);
+ //       Scharr(bSeam,bfgy,CV_32F,0,1);
+//        Scharr(bSeam,bfgx,CV_32F,1,0);
+//       ps1 = MatchTemplate(afgx, bfgx, Point2f(i*windowStep,a.rows));
+//        ps3 = MatchTemplate(afgy, bfgy, Point2f(i*windowStep,a.rows));
+//        meanStdDev(bfgx,meanGr,stdDevGr);
         bSeam.convertTo(bf,CV_32F);
         // Image match
-        ps2= MatchTemplate(af, bf, Point2f(i*windowStep,a.rows));
-
+        ps2= MatchTemplate(af, bf, -Point2f(i*windowStep,a.rows));
         meanStdDev(bf,meanIm,stdDevIm);
+        b.convertTo(bf,CV_32F);
+        if (ps2.x + i*windowStep >= 0 && ps2.x + i*windowStep + windowWidth < af.cols && ps2.y<0)
+        {
+            af(Rect(i*windowStep+ps2.x,128+ps2.y,windowWidth,-ps2.y)).copyTo(aSeam);
+            ps4 = MatchTemplate(bf, aSeam, -Point2f(i*windowStep-ps2.x,ps2.y));
+            ps4.y=-ps4.y;
+
+        }
+        else
+        {
+            ps4 = Point2f(-1000,-1000);
+            ps2 = Point2f(-1000,-1000);
+        }
         if (debug == 1)
         {
             imshow("seamA",a);
             imshow("seamB",bSeam);
-            cout << stdDevIm.at<double>(0, 0) << "\t" << stdDevGr.at<double>(0, 0) << "\n";
 
             waitKey(); 
         }
-        if (stdDevIm.at<double>(0, 0)>threshStdLevel && norm(ps1-ps2)<3 && stdDevGr.at<double>(0, 0)>threshStdGr && i>0 && i<nbZone-1)
+        if (meanIm.at<double>(0, 0)>40 && stdDevIm.at<double>(0, 0)>threshStdLevel && i>=0 && i<nbZone && norm(ps4-ps2)<4 && norm(ps4)<20)
         // if (stdDevIm.at<double>(0, 0)>threshStdLevel && i>0 && i<nbZone-1)
             status.push_back(true);
         else
         {
+            ps4 = Point2f(-1000,-1000);
+            ps2 = Point2f(-1000,-1000);
             status.push_back(false);
-            if (stdDevIm.at<double>(0, 0)>threshStdLevel)
-                ps2=ps1;
-            if (stdDevGr.at<double>(0, 0)>threshStdGr)
-                ps1=ps2;
         }
-        dm.push_back(Point2f((ps1+ps2)/2));
+        dm.push_back(Point2f((ps2.x+ps4.x)/2,-(ps2.y+ps4.y)/2));
     }
-    double dy=0;
+/*    double dy=0;
     int nb=0;
     for (int i = 0; i<dm.size();i++)
         if (status[i])
@@ -449,14 +540,12 @@ double  JunoCam::LookForSeam(Mat a, Mat b,int seamHeight,    int nbZone, vector<
             nb++;
         }
     if (nb>0)
-        dm[0].y=dy/nb;
+        dm[0].y=dy/nb;*/
     return errorMin;
 
 }
 
-
-
-Mat JunoCam::ExtractRaw(int begFrameLet,int lastFrameLet)
+Mat JunoCam::ExtractRaw(int begFrameLet,int lastFrameLet,bool useCfgFile)
 {
     int nbFrameLet=lastFrameLet-begFrameLet+1;
     Mat result(128*(lastFrameLet-begFrameLet+1),x.cols,CV_8UC(nbChannel));
@@ -466,8 +555,246 @@ Mat JunoCam::ExtractRaw(int begFrameLet,int lastFrameLet)
     vector<Mat> planDst(nbChannel);
     vector<Mat> planSrc(nbChannel);
     split(result,planSrc);
-    nbZone=20;
+    nbZone=25;
     int offsetFrameLet=begFrameLet;
+    ofstream fQuadric("quadric.txt",ios::app);
+    if (fQuadric.is_open())
+        fQuadric << "***************************"<<fileName<<"\n";
+    for (int k = nbChannel-1; k>=0; k--)
+    {
+        for (int i = 0; i < nbFrameLet; i++)
+        {
+            int offset=i+offsetFrameLet;
+            if (offset>=nbFrameLet)
+                offset-=nbFrameLet;
+            int ind=i;
+            int offsety=0;
+            Range r(ind*nbChannel*128+k*128+offsety,ind*nbChannel*128+(k+1)*128+offsety);
+            Rect rDst(0,offset*(128),x.cols,128);
+            if (rDst.y + rDst.height <= planSrc[k].rows && rDst.y  >= 0)
+                x.rowRange(r).copyTo(planSrc[k](rDst));
+        }
+        Mat qx;
+        Mat qy;
+
+        if (!useCfgFile)
+        {
+
+            vector<vector<Point2f>> h(nbFrameLet);
+            status.clear();
+            status.resize(nbFrameLet);
+            for (int i = 0; i < nbFrameLet; i++)
+            {
+                double error;
+                if (i!=nbFrameLet-1)
+                    error=LookForSeam(planSrc[k].rowRange(Range(i*128,(i+1)*128)),planSrc[k].rowRange(Range((i+1)*128,(i+2)*128)),8+k,nbZone,h[i],status[i]);
+                else
+                    error=LookForSeam(planSrc[k].rowRange(Range(i*128,(i+1)*128)),planSrc[k].rowRange(Range(i*128,(i+1)*128)),16,nbZone,h[i],status[i]);
+
+            }
+            vector<Point2f> moyZone(nbZone);
+            vector<Point2f> moyFrameLet(nbFrameLet);
+            vector<int> nbSuccessZone(nbZone);
+            vector<int> nbSuccessFramelet(nbFrameLet);
+            vector<double> zx,zy;
+            vector<Point2f> pt;
+        
+            for (int i=0;i<nbFrameLet-1;i++)
+            {
+            
+                for (int j=0;j<nbZone; j++)
+                    if (status[i][j])
+                    {
+                            pt.push_back(Point2f(j,i));
+                            zx.push_back(h[i][j].x);
+                            zy.push_back(h[i][j].y);
+
+                    }
+
+            }
+            if (zx.size()<10)
+                return Mat();
+            qx = PolyFit(zx,pt,2);
+            qy = PolyFit(zy,pt,2);
+            if (fQuadric.is_open())
+            {
+                fQuadric << qx.t()<<"\t";
+                fQuadric << qy.t()<<"\n";
+                fQuadric.flush();
+            }
+            indFirstValid.clear();
+            indLastValid.clear();
+            indFirstValid.resize(nbFrameLet);
+            indLastValid.resize(nbFrameLet);
+            for (int i=0;i<nbFrameLet;i++)
+            {
+                bool firstValid=false,lastValid=false;
+                int indfirstValid=nbZone-1,indlastValid=0;
+                indFirstValid[i]=-1;indLastValid[i]=-1;
+                for (int j=0;j<nbZone; j++)
+                    if (status[i][j] && !firstValid)
+                    {
+                        indfirstValid=j; 
+                        firstValid=true;
+                        break;
+                    }
+                for (int j=nbZone-1;j>=0; j--)
+                    if (status[i][j] && !lastValid)
+                    {
+                        indlastValid=j; 
+                        lastValid=true;
+                        break;
+                    }
+                indFirstValid[i]=max(0,indfirstValid-1);
+                indLastValid[i]=min(nbZone-1,indlastValid+1);
+                for (int j=max(0,indfirstValid-1);j<min(nbZone-1,indlastValid+1); j++)
+                    status[i][j]=true;
+                ofstream fs;
+                if(k==03) fs.open("motion2.txt",ios::out);
+                if (fs.is_open())
+                {
+                    for (int i=0;i<nbFrameLet;i++)
+                    {
+                
+                        fs.width(10);
+                        for (int j = 0; j < status[0].size(); j++)
+                        {
+                            fs.width(10);
+                            fs.right;
+                            fs.scientific;
+                            fs <<setprecision(4)<< status[i][j]<< "\t";
+                        }
+                        fs << "\n";
+                    }
+                    fs.flush();
+                    fs.close();
+                }
+                if(k==3) fs.open("motiony2.txt",ios::out);
+                if (fs.is_open())
+                {
+                    for (int i=0;i<nbFrameLet;i++)
+                    {
+                
+                        fs.width(10);
+                        for (int j = 0; j < status[0].size(); j++)
+                        {
+                            fs.width(10);
+                            fs.right;
+                            fs.scientific;
+                            fs <<setprecision(4)<< PolyVal(qy,j,i) << "\t" << h[i][j].y  << "\t";
+                        }
+                        fs << "\n";
+                    }
+                    fs.flush();
+                    fs.close();
+                }
+                if(k==3) fs.open("motionx2.txt",ios::out);
+                if (fs.is_open())
+                {
+                    for (int i=0;i<nbFrameLet;i++)
+                    {
+                
+                        fs.width(10);
+                        for (int j = 0; j < status[0].size(); j++)
+                        {
+                            fs.width(10);
+                            fs.right;
+                            fs.scientific;
+                            fs <<setprecision(4)<< PolyVal(qx,j,i) << "\t" << h[i][j].x  << "\t";
+                        }
+                        fs << "\n";
+                    }
+                    fs.flush();
+                    fs.close();
+                }
+            }
+
+        }
+        else
+        {
+            qx = qxRef[k];
+            qy = qyRef[k];
+        }
+
+
+
+        double offsetY=0;
+        int prevFrameLet=0;
+        int larZone = planSrc[k].cols/(nbZone+3);
+        vector<double> dyCum(mapX.cols);
+        vector<double> dxCum(mapX.cols);
+
+        vector<int> frameLetRow(mapX.cols);
+        int indFrame=0,indFramePrev=0;
+        int offsetFameLetY=0;
+        for (int j = 0; j < dyCum.size(); j++)
+        {
+            dyCum[j]= 0;
+            dxCum[j]= 0;
+            frameLetRow[j]=0;
+        }
+
+
+
+        for (int i=0;i<mapX.rows;i++)
+        {
+            float *ptrX = (float*)mapX.ptr(i);
+            float *ptrY = (float*)mapY.ptr(i);
+            for (int j=0;j<mapX.cols;j++,ptrX++,ptrY++)
+            {   
+                if (static_cast<int>(frameLetRow[j]  + 1) / 128 != static_cast<int>(frameLetRow[j] ) / 128)
+                {
+                    int indZone=j/larZone;
+                    indFrame = (frameLetRow[j] ) / 128;
+                    dyCum[j] = PolyVal(qy,indZone+static_cast<double>(j-indZone*larZone)/larZone,indFrame);
+                    if (dyCum[j]<0)
+                        dyCum[j]=0;
+                    dxCum[j] -= PolyVal(qx,indZone+static_cast<double>(j-indZone*larZone)/larZone,indFrame);
+                    frameLetRow[j] = (indFrame+1)*128+dyCum[j]+1;
+                }
+                else
+                    frameLetRow[j]++;
+                *ptrX=j+dxCum[j];
+                *ptrY=frameLetRow[j];
+
+            }
+
+
+        }
+
+
+
+        if (k==0)
+            remap(1.2*planSrc[k],planDst[k],mapX,mapY, CV_INTER_CUBIC);
+        else
+            remap(planSrc[k],planDst[k],mapX,mapY, CV_INTER_CUBIC);
+        imwrite(format("pSrc%d",k)+fileName,planSrc[k]);
+        imwrite(format("pDst%d",k)+fileName,planDst[k]);
+        if(k==0)imshow("planDst0",planDst[0]);
+        if(k==1)imshow("planDst1",planDst[1]);
+        if(k==2)imshow("planDst2",planDst[2]);
+        waitKey(30);
+    }
+    result = MatchChannel(planDst,false);
+    imshow("org",result);
+    waitKey(10);
+    return result;
+}
+
+
+Mat JunoCam::OldExtractRaw(int begFrameLet,int lastFrameLet,bool useCfgFile)
+{
+    int nbFrameLet=lastFrameLet-begFrameLet+1;
+    Mat result(128*(lastFrameLet-begFrameLet+1),x.cols,CV_8UC(nbChannel));
+    Mat mapX( result.size(), CV_32FC1 );
+    Mat mapY( result.size(), CV_32FC1 );
+    result.setTo(Vec3b(0,0,0));
+    vector<Mat> planDst(nbChannel);
+    vector<Mat> planSrc(nbChannel);
+    split(result,planSrc);
+    nbZone=25;
+    int offsetFrameLet=begFrameLet;
+    ofstream fQuadric("quadric.txt",ios::app);
     for (int k = 0; k <nbChannel; k++)
     {
         for (int i = 0; i < nbFrameLet; i++)
@@ -475,123 +802,158 @@ Mat JunoCam::ExtractRaw(int begFrameLet,int lastFrameLet)
             int offset=i+offsetFrameLet;
             if (offset>=nbFrameLet)
                 offset-=nbFrameLet;
-            Range r(i*nbChannel*128+k*128,i*nbChannel*128+(k+1)*128);
+            int ind=i;
+            int offsety=0;
+            /*            int ind=10;
+            int offsety=92,offsetx=0;
+            if (i%2==0)
+            {
+                ind=10;
+                offsety=0;
+            }
+            else
+            {
+                ind=10;
+                offsety=110;
+                offsetx=5;
+            }*/
+            Range r(ind*nbChannel*128+k*128+offsety,ind*nbChannel*128+(k+1)*128+offsety);
             Rect rDst(0,offset*(128),x.cols,128);
             if (rDst.y + rDst.height <= planSrc[k].rows && rDst.y  >= 0)
                 x.rowRange(r).copyTo(planSrc[k](rDst));
         }
-        vector<vector<Point2f>> h(nbFrameLet);
-        vector<vector<bool>> status(nbFrameLet);
-        for (int i = 0; i < nbFrameLet; i++)
-        {
-            double error;
-            if (i!=nbFrameLet-1)
-                error=LookForSeam(planSrc[k].rowRange(Range(i*128,(i+1)*128)),planSrc[k].rowRange(Range((i+1)*128,(i+2)*128)),8,nbZone,h[i],status[i]);
-            else
-                error=LookForSeam(planSrc[k].rowRange(Range(i*128,(i+1)*128)),planSrc[k].rowRange(Range(i*128,(i+1)*128)),16,nbZone,h[i],status[i]);
+        Mat qx;
+        Mat qy;
 
-        }
-        vector<Point2f> moyZone(nbZone);
-        vector<Point2f> moyFrameLet(nbFrameLet);
-        vector<int> nbSuccessZone(nbZone);
-        vector<int> nbSuccessFramelet(nbFrameLet);
-/*        for (int j=0;j<nbFrameLet;j++)
+        if (!useCfgFile)
         {
-            nbSuccessFramelet[j]=0;
-            moyFrameLet[j] = Point2f(0,0);
-            for (int i=0;i<nbZone; i++)
-                if (status[j][i])
-                {
-                   moyFrameLet[j] += h[j][i];
-                   nbSuccessFramelet[j]++;
-                }
-        }
-        Point2f lastPt;
-        for (int j=0;j<nbFrameLet-1;j++)
-        {
-            if (nbSuccessFramelet[j]>0)
+
+            vector<vector<Point2f>> h(nbFrameLet);
+            vector<vector<bool>> status(nbFrameLet);
+            for (int i = 0; i < nbFrameLet; i++)
             {
-                moyFrameLet[j] /= nbSuccessFramelet[j];
-                lastPt=moyFrameLet[j];
+                double error;
+                if (i!=nbFrameLet-1)
+                    error=LookForSeam(planSrc[k].rowRange(Range(i*128,(i+1)*128)),planSrc[k].rowRange(Range((i+1)*128,(i+2)*128)),8+k,nbZone,h[i],status[i]);
+                else
+                    error=LookForSeam(planSrc[k].rowRange(Range(i*128,(i+1)*128)),planSrc[k].rowRange(Range(i*128,(i+1)*128)),16,nbZone,h[i],status[i]);
+
             }
-            else if (j>=1) 
-                moyFrameLet[j] = lastPt;
-
-        }
-        for (int j=nbFrameLet-2;j>=0;j--)
-        {
-        if (nbSuccessFramelet[j]==0)
-                moyFrameLet[j] = (moyFrameLet[j]+lastPt)/2;
-            else
-                lastPt=moyFrameLet[j];
-
-        }
-        for (int i=0;i<nbZone; i++)
-        {
-            nbSuccessZone[i]=0;
-            moyZone[i] = Point2f(0,0);
+            vector<Point2f> moyZone(nbZone);
+            vector<Point2f> moyFrameLet(nbFrameLet);
+            vector<int> nbSuccessZone(nbZone);
+            vector<int> nbSuccessFramelet(nbFrameLet);
+    /*        for (int j=0;j<nbFrameLet;j++)
+            {
+                nbSuccessFramelet[j]=0;
+                moyFrameLet[j] = Point2f(0,0);
+                for (int i=0;i<nbZone; i++)
+                    if (status[j][i])
+                    {
+                       moyFrameLet[j] += h[j][i];
+                       nbSuccessFramelet[j]++;
+                    }
+            }
+            Point2f lastPt;
             for (int j=0;j<nbFrameLet-1;j++)
-                if (status[j][i]&& fabs(h[j][i].y-moyFrameLet[j].y)<2)
+            {
+                if (nbSuccessFramelet[j]>0)
                 {
-                    nbSuccessZone[i]++;
-                    moyZone[i]+=h[j][i];
-
+                    moyFrameLet[j] /= nbSuccessFramelet[j];
+                    lastPt=moyFrameLet[j];
                 }
-        }
-        for (int i=0;i<nbZone; i++)
-        {
-            if (nbSuccessZone[i]>0)
-            {
-                moyZone[i]/=nbSuccessZone[i];
-                lastPt=moyZone[i];
-            }
-            else if (i>=1 && nbSuccessZone[i-1]>0)
-                moyZone[i] =moyZone[i-1];
+                else if (j>=1) 
+                    moyFrameLet[j] = lastPt;
 
-        }
-        for (int i=nbZone-2;i>=0; i--)
-        {
-            if (nbSuccessZone[i]==0 &&nbSuccessZone[i+1]>0 )
-            {
-                moyZone[i] = (moyZone[i] )/2 ;
             }
-            else
-                lastPt=moyZone[i];
-        }
-        for (int i=0;i<nbFrameLet;i++)
-        {
+            for (int j=nbFrameLet-2;j>=0;j--)
+            {
+            if (nbSuccessFramelet[j]==0)
+                    moyFrameLet[j] = (moyFrameLet[j]+lastPt)/2;
+                else
+                    lastPt=moyFrameLet[j];
+
+            }
+            for (int i=0;i<nbZone; i++)
+            {
+                nbSuccessZone[i]=0;
+                moyZone[i] = Point2f(0,0);
+                for (int j=0;j<nbFrameLet-1;j++)
+                    if (status[j][i]&& fabs(h[j][i].y-moyFrameLet[j].y)<2)
+                    {
+                        nbSuccessZone[i]++;
+                        moyZone[i]+=h[j][i];
+
+                    }
+            }
+            for (int i=0;i<nbZone; i++)
+            {
+                if (nbSuccessZone[i]>0)
+                {
+                    moyZone[i]/=nbSuccessZone[i];
+                    lastPt=moyZone[i];
+                }
+                else if (i>=1 && nbSuccessZone[i-1]>0)
+                    moyZone[i] =moyZone[i-1];
+
+            }
+            for (int i=nbZone-2;i>=0; i--)
+            {
+                if (nbSuccessZone[i]==0 &&nbSuccessZone[i+1]>0 )
+                {
+                    moyZone[i] = (moyZone[i] )/2 ;
+                }
+                else
+                    lastPt=moyZone[i];
+            }
+            for (int i=0;i<nbFrameLet;i++)
+            {
             
-            for (int j=0;j<nbZone; j++)
-                if (!status[i][j] && nbSuccessFramelet[i]>0)
-                {
-                    status[i][j]=1;    
-                    h[i][j].x = moyZone[j].x;
-                    h[i][j].y = moyFrameLet[i].y;
+                for (int j=0;j<nbZone; j++)
+                    if (!status[i][j] && nbSuccessFramelet[i]>0)
+                    {
+                        status[i][j]=1;    
+                        h[i][j].x = moyZone[j].x;
+                        h[i][j].y = moyFrameLet[i].y;
 
-                }
+                    }
 
-        }*/
-        vector<double> zx,zy;
-        vector<Point2f> pt;
+            }*/
+            vector<double> zx,zy;
+            vector<Point2f> pt;
         
-        for (int i=0;i<nbFrameLet-1;i++)
-        {
+            for (int i=0;i<nbFrameLet-1;i++)
+            {
             
-            for (int j=1;j<nbZone-1; j++)
-                if (status[i][j])
-                {
-                        pt.push_back(Point2f(j,i));
-                        zx.push_back(h[i][j].x);
-                        zy.push_back(h[i][j].y);
+                for (int j=1;j<nbZone-1; j++)
+                    if (status[i][j])
+                    {
+                            pt.push_back(Point2f(j,i));
+                            zx.push_back(h[i][j].x);
+                            zy.push_back(h[i][j].y);
 
-                }
+                    }
 
+            }
+            if (zx.size()<10)
+                return Mat();
+            qx = PolyFit(zx,pt,2);
+            qy = PolyFit(zy,pt,2);
+            if (fQuadric.is_open())
+            {
+                fQuadric << qx.t()<<"\t";
+                fQuadric << qy.t()<<"\n";
+                fQuadric.flush();
+           }
+        }
+        else
+        {
+            qx = qxRef[k];
+            qy = qyRef[k];
         }
 
-        Mat qx = PolyFit(zx,pt,2);
-        Mat qy = PolyFit(zy,pt,2);
 
-        ofstream fs;
+ /*        ofstream fs;
         if(k==0) fs.open("motion0.txt",ios::app);
         if(k==1) fs.open("motion1.txt",ios::app);
         if(k==2) fs.open("motion2.txt",ios::app);
@@ -600,14 +962,14 @@ Mat JunoCam::ExtractRaw(int begFrameLet,int lastFrameLet)
             for (int i=0;i<nbFrameLet;i++)
             {
                 
- /*               for (int j = 0; j < h[0].size(); j++)
+               for (int j = 0; j < h[0].size(); j++)
                 {
                     fs.width(10);
                     fs.right;
                     fs.scientific;
                     fs <<setprecision(4) << h[i][j].x << "\t" << h[i][j].y << "\t" ;
                 }
-                fs << "\n";*/
+                fs << "\n";
                 fs.width(10);
                 for (int j = 0; j < h[0].size(); j++)
                 {
@@ -620,15 +982,14 @@ Mat JunoCam::ExtractRaw(int begFrameLet,int lastFrameLet)
             }
         }
         fs.flush();
-        fs.close();
+        fs.close();*/
 
-        ;
         double offsetY=0;
         int prevFrameLet=0;
         int larZone = planSrc[k].cols/(nbZone+3);
         vector<double> dyCum(mapX.cols);
         vector<double> dXCum(mapX.cols);
-#ifndef TOTO
+
         int frameLetRow=-1;
         int indFrame=0,indFramePrev=0;
         int offsetFameLetY=0;
@@ -652,13 +1013,16 @@ Mat JunoCam::ExtractRaw(int begFrameLet,int lastFrameLet)
                         maxOffset=dyCum[j];
                 }
 
-                indFrame=frameLetRow/128;
+                //indFrame=frameLetRow/128;
+                indFrame++;
+
             }
             for (int j=0;j<mapX.cols;j++,ptrX++,ptrY++)
             {   
                 int indZone=j/larZone;
                 double dx=PolyVal(qx,indZone+static_cast<double>(j-indZone*larZone)/larZone,indFrame-1)*(1-static_cast<double>(frameLetRow-indFrame*128)/128);
-                double dy=dyCum[j]*(1-static_cast<double>(frameLetRow-indFrame*128)/128);
+//                double dy=dyCum[j]*(1-static_cast<double>(frameLetRow-indFrame*128)/128);
+                double dy=dyCum[j];
                 *ptrX=j+dx;
                 *ptrY=frameLetRow+dy;
 
@@ -669,84 +1033,20 @@ Mat JunoCam::ExtractRaw(int begFrameLet,int lastFrameLet)
 
 
 
-#else
-        for (int ind = 0; ind < nbFrameLet; ind++)
-        {
-            int begRow,endRow;
-            double dy0;
-            if (ind == 0)
-            {
-                begRow=0;
-                dy0=0;
-                for (int ii=0;ii<dyCum.size();ii++)
-                    dyCum[ii]=0;
-            }
-            else
-            {
-                dy0=PolyVal(qy,0,ind);
-                offsetY -= dy0;
-                begRow=offsetY+ind*128;
-            }
-//            begRow=0;
-            endRow=begRow+128;
-            if (endRow>=mapX.rows)
-                endRow=mapX.rows;
-            for (int i = begRow; i <endRow; i++)
-            {
-                float *ptrX = (float*)mapX.ptr(i);
-                float *ptrY = (float*)mapY.ptr(i);
-                for (int j = 0; j < mapX.cols; j++, ptrX++, ptrY++)
-                {
-                    int indZone=j/larZone;
-                    if (indZone>=nbZone)
-                        indZone=nbZone-1;
-                    double dx,dy;
-                    dx = PolyVal(qx,indZone+static_cast<double>(j-indZone*larZone)/larZone,ind);
-                    dy = PolyVal(qy,indZone+static_cast<double>(j-indZone*larZone)/larZone,ind);
-                    *ptrX=static_cast<float>(j+dx*(1.0-static_cast<double>(i-begRow)/(endRow-begRow-1))); // no radial distortion +3.8325e-8*(j-mapX.cols/2)*(j-mapX.cols/2)
-                   //*ptrX=static_cast<float>(j+h[ind][indZone].x*(1.0-static_cast<double>(i-endRow)/(endRow-begRow-1))); // no radial distortion +3.8325e-8*(j-mapX.cols/2)*(j-mapX.cols/2)
-                    int offsetY=(ind)*128;
-                    if (offsetY>mapX.rows)
-                        offsetY -=mapX.rows;
-                    if (offsetY<0)
-                        offsetY +=mapX.rows;
-//                    *ptrY=static_cast<float>(offsetY+i-(begRow+dy0-dy));
-//                    if (i-begRow+dy<128)
-//                        *ptrY=static_cast<float>(i-begRow+offsetY);
-                     *ptrY=static_cast<float>(i-begRow+offsetY/*-dyCum[j]-dy*/);
-//                    *ptrY=static_cast<float>(offsetY+i-(begRow+h[ind][0].y-h[ind][indZone].y));
- //                  *ptrY=static_cast<float>(offsetY+i-(begRow+h[ind][0].y-dy));
-
-//                   *ptrY=static_cast<float>(offsetY+i-(begRow+dy0-dy));
-                }
-            
-
-            }
-            for (int j = 0; j < dyCum.size(); j++)
-            {
-                int indZone=j/larZone;
-                dyCum[j]+= PolyVal(qy,indZone+static_cast<double>(j-indZone*larZone)/larZone,ind);;
-
-            }
-
-
-        }
-#endif
         if (k==0)
             remap(1.2*planSrc[k],planDst[k],mapX,mapY, CV_INTER_CUBIC);
         else
             remap(planSrc[k],planDst[k],mapX,mapY, CV_INTER_CUBIC);
         imwrite(format("pSrc%d.png",k),planSrc[k]);
-        imwrite(format("pDst%d.png",k),planDst[k]);
+        imwrite(format("pDst%d%s",k,fileName),planDst[k]);
         if(k==0)imshow("planDst0",planDst[0]);
         if(k==1)imshow("planDst1",planDst[1]);
         if(k==2)imshow("planDst2",planDst[2]);
         waitKey(30);
-//            imshow("org",planSrc[k]);
     }
-    result = MatchChannel(planDst);
+    result = MatchChannel(planDst,true);
     imshow("org",result);
-    waitKey();
+    waitKey(10);
     return result;
 }
 
@@ -804,155 +1104,216 @@ bool JunoCam::SetMat(Mat a)
     rawFormat=false;
     return false;
 }
-Mat JunoCam::MatchChannel(vector<Mat> planDst)
+Mat JunoCam::MatchChannel(vector<Mat> planDst,bool useCfgFile)
 {
-        Ptr<Feature2D> b;
+    Ptr<Feature2D> b;
     vector<Mat> descImg(nbChannel);
     vector<vector<KeyPoint>> keyImg(nbChannel);
     Mat result;
-
-    for (int i = 0; i < nbChannel; i++)
-    {
-        b = cv::xfeatures2d::SURF::create(8+i,4,3,true);
-        vector<KeyPoint> k;
-        Mat d;
-
-        b->detectAndCompute(planDst[i],Mat(),keyImg[i],descImg[i]);
-        }
-    vector<Mat> h;
     vector<Mat> pTst(nbChannel);
-    for (int i = 1; i < nbChannel; i++)
+    Mat mapX( planDst[0].size(), CV_32FC1 );
+    Mat mapY( planDst[0].size(), CV_32FC1 );
+    int nbZoneX=2,nbZoneY=1;
+    int nbZone=nbZoneX*nbZoneY;
+
+    if (!useCfgFile)
     {
-        int prev,curr=1;;
-        if (i==1)
-            prev=0;
-        else
-            prev=2;
-        vector<DMatch> matches;
-        BFMatcher descriptorMatcher(b->defaultNorm(),true);
-        descriptorMatcher.match(descImg[prev], descImg[curr], matches, Mat());
-        // Keep best matches 
-        // We sort distance between descriptor matches
-        Mat index;
-        int nbMatch=int(matches.size());
-        Mat tab(nbMatch, 1, CV_32F);
-        for (int ii = 0; ii<nbMatch; ii++)
+        for (int i = 0; i < nbChannel; i++)
         {
-            tab.at<float>(ii, 0) = matches[ii].distance;
-        }
-        sortIdx(tab, index, SORT_EVERY_COLUMN + SORT_ASCENDING);
-        nbMatch =(nbMatch*2)/4;
-        Point2f cornerLeftUp,cornerRightBottom;
-        cornerLeftUp=keyImg[curr][matches[index.at<int>(0,0)].trainIdx].pt;
-        cornerRightBottom=keyImg[curr][matches[index.at<int>(0,0)].trainIdx].pt;
-        for (int k = 1; k < max(nbMatch, 6); k++)
+            b = cv::xfeatures2d::SURF::create(8+i,4,3,true);
+            vector<KeyPoint> k;
+            Mat d;
+
+            b->detectAndCompute(planDst[i],Mat(),keyImg[i],descImg[i]);
+            }
+        vector<Mat> h;
+        ofstream fHomography("homography.txt",ios::app);
+        for (int i = 1; i < nbChannel; i++)
         {
-            int j = index.at<int>(k,0);
-            if (keyImg[curr][matches[j].trainIdx].pt.x<cornerLeftUp.x)
-                cornerLeftUp.x=keyImg[curr][matches[j].trainIdx].pt.x;
-            if (keyImg[curr][matches[j].trainIdx].pt.y<cornerLeftUp.y)
-                cornerLeftUp.y=keyImg[curr][matches[j].trainIdx].pt.y;
-            if (keyImg[curr][matches[j].trainIdx].pt.x>cornerRightBottom.x)
-                cornerRightBottom.x=keyImg[curr][matches[j].trainIdx].pt.x;
-            if (keyImg[curr][matches[j].trainIdx].pt.y>cornerRightBottom.y)
-                cornerRightBottom.y=keyImg[curr][matches[j].trainIdx].pt.y;
-        }
-        vector<Point2d> src,dst;
-        Mat mapX( planDst[0].size(), CV_32FC1 );
-        Mat mapY( planDst[0].size(), CV_32FC1 );
-        int width=cornerRightBottom.x-cornerLeftUp.x,height=cornerRightBottom.y-cornerLeftUp.y;
-        vector<Rect> squareZone;
-        int nbZoneX=2,nbZoneY=1;
-        int nbZone=nbZoneX*nbZoneY;
-        for (int nbSquare = 0; nbSquare < nbZone; nbSquare++)
-        {
-            src.clear();
-            dst.clear();
-            Rect zone(cornerLeftUp.x+width/nbZoneX*(nbSquare%nbZoneX),cornerLeftUp.y+height/nbZoneY*(nbSquare/nbZoneX),width/nbZoneX,height/nbZoneY);
-            while (src.size() < nbMatch/nbZone)
+            int prev,curr=1;;
+            if (i==1)
+                prev=0;
+            else
+                prev=2;
+            vector<DMatch> matches;
+            BFMatcher descriptorMatcher(b->defaultNorm(),true);
+            descriptorMatcher.match(descImg[prev], descImg[curr], matches, Mat());
+            // Keep best matches 
+            // We sort distance between descriptor matches
+            Mat index;
+            int nbMatch=int(matches.size());
+            Mat tab(nbMatch, 1, CV_32F);
+            for (int ii = 0; ii<nbMatch; ii++)
+            {
+                tab.at<float>(ii, 0) = matches[ii].distance;
+            }
+            sortIdx(tab, index, SORT_EVERY_COLUMN + SORT_ASCENDING);
+            nbMatch =(nbMatch*2)/4;
+            Point2f cornerLeftUp,cornerRightBottom;
+            cornerLeftUp=keyImg[curr][matches[index.at<int>(0,0)].trainIdx].pt;
+            cornerRightBottom=keyImg[curr][matches[index.at<int>(0,0)].trainIdx].pt;
+            for (int k = 1; k < max(nbMatch, 6); k++)
+            {
+                int j = index.at<int>(k,0);
+                if (keyImg[curr][matches[j].trainIdx].pt.x<cornerLeftUp.x)
+                    cornerLeftUp.x=keyImg[curr][matches[j].trainIdx].pt.x;
+                if (keyImg[curr][matches[j].trainIdx].pt.y<cornerLeftUp.y)
+                    cornerLeftUp.y=keyImg[curr][matches[j].trainIdx].pt.y;
+                if (keyImg[curr][matches[j].trainIdx].pt.x>cornerRightBottom.x)
+                    cornerRightBottom.x=keyImg[curr][matches[j].trainIdx].pt.x;
+                if (keyImg[curr][matches[j].trainIdx].pt.y>cornerRightBottom.y)
+                    cornerRightBottom.y=keyImg[curr][matches[j].trainIdx].pt.y;
+            }
+            vector<Point2d> src,dst;
+            int width=cornerRightBottom.x-cornerLeftUp.x,height=cornerRightBottom.y-cornerLeftUp.y;
+            vector<Rect> squareZone;
+            for (int nbSquare = 0; nbSquare < nbZone; nbSquare++)
             {
                 src.clear();
                 dst.clear();
-                
-                for (int k = 0; k < max(nbMatch,6); k++)
+                Rect zone(cornerLeftUp.x+width/nbZoneX*(nbSquare%nbZoneX),cornerLeftUp.y+height/nbZoneY*(nbSquare/nbZoneX),width/nbZoneX,height/nbZoneY);
+                while (src.size() < nbMatch/nbZone)
                 {
-                    int j = index.at<int>(k,0);
-                    if (keyImg[prev][matches[j].queryIdx].pt.inside(zone))
+                    src.clear();
+                    dst.clear();
+                
+                    for (int k = 0; k < max(nbMatch,6); k++)
                     {
-                    src.push_back(keyImg[prev][matches[j].queryIdx].pt); 
-                    dst.push_back(keyImg[curr][matches[j].trainIdx].pt);
+                        int j = index.at<int>(k,0);
+                        if (keyImg[prev][matches[j].queryIdx].pt.inside(zone))
+                        {
+                        src.push_back(keyImg[prev][matches[j].queryIdx].pt); 
+                        dst.push_back(keyImg[curr][matches[j].trainIdx].pt);
+                        }
                     }
+                    zone.x -= zone.width*0.05;
+                    zone.y -= zone.height*0.05;
+                    if (zone.x<0)
+                        zone.x=0;
+                    if (zone.x>=planDst[0].cols)
+                        zone.x=planDst[0].cols-1;
+                    if (zone.y<0)
+                        zone.y=0;
+                    if (zone.y>=planDst[0].rows)
+                        zone.x=planDst[0].rows-1;
+                    zone.width*=1.1;
+                    zone.height*=1.1;
                 }
-                zone.x -= zone.width*0.05;
-                zone.y -= zone.height*0.05;
-                if (zone.x<0)
-                    zone.x=0;
-                if (zone.x>=planDst[0].cols)
-                    zone.x=planDst[0].cols-1;
-                if (zone.y<0)
-                    zone.y=0;
-                if (zone.y>=planDst[0].rows)
-                    zone.x=planDst[0].rows-1;
-                zone.width*=1.1;
-                zone.height*=1.1;
-            }
-            squareZone.push_back(zone);
-            Mat hh;
-            hh = Mat::zeros(3,3,CV_64FC1);
-            hh.at<double>(0,0)=1;
-            hh.at<double>(0,1)=0;
-            hh.at<double>(1,1)=1;
-            hh.at<double>(1,0)=0;
-            if (src.size() > 6 && dst.size() > 6)
-            {
-                Mat o;
-                hh=findHomography(src,dst,RANSAC,1,o,3000,0.998);
-                vector<double> paramIni = {hh.at<double>(0,0),hh.at<double>(0,1),hh.at<double>(0,2),hh.at<double>(1,0),hh.at<double>(1,1),hh.at<double>(1,2)};
-                vector<Point2d> srca,dsta;
-                for (int ii=0;ii<o.rows;ii++)
-                    if (o.at<uchar>(ii, 0) != 0)
-                    {
-                        srca.push_back(src[ii]);
-                        dsta.push_back(dst[ii]);
-                    }
-                vector<double> hhh=AjusteHomography(srca,dsta,paramIni);
-                hh= (Mat_<double>(3,3) << hhh[0],hhh[1],hhh[2],hhh[3],hhh[4],hhh[5],0,0,1);
-            }
-            if (hh.empty() )
-            {
+                squareZone.push_back(zone);
+                Mat hh;
                 hh = Mat::zeros(3,3,CV_64FC1);
                 hh.at<double>(0,0)=1;
                 hh.at<double>(0,1)=0;
                 hh.at<double>(1,1)=1;
                 hh.at<double>(1,0)=0;
-
-            }
-            cout << "Zone " << zone << "****Match :" << src.size()<<endl;
-            cout<<hh<<endl;
-            h.push_back(hh);
-            for (int ii = 0; ii <zone.height; ii++)
-            {
-                if (ii+zone.y>=0 && ii+zone.y<mapX.rows)
+                if (src.size() > 6 && dst.size() > 6)
                 {
-                    float *ptrX = (float*)mapX.ptr(ii+zone.y)+zone.x;
-                    float *ptrY = (float*)mapY.ptr(ii+zone.y)+zone.x;
-                    for (int j = 0; j < zone.width; j++, ptrX++, ptrY++)
-                    {
-                        if (j+zone.x>=0 && j+zone.x<mapX.cols)
+                    Mat o;
+                    hh=findHomography(src,dst,RANSAC,1,o,3000,0.998);
+                    vector<double> paramIni = {hh.at<double>(0,0),hh.at<double>(0,1),hh.at<double>(0,2),hh.at<double>(1,0),hh.at<double>(1,1),hh.at<double>(1,2)};
+                    vector<Point2d> srca,dsta;
+                    for (int ii=0;ii<o.rows;ii++)
+                        if (o.at<uchar>(ii, 0) != 0)
                         {
-                            Mat p=(Mat_<double>(3,1)<<j+zone.x,ii+zone.y,1);
-                            Mat q=hh.inv()*p;
-                            *ptrX = q.at<double>(0,0)/q.at<double>(2,0);
-                            *ptrY = q.at<double>(1,0)/q.at<double>(2,0);
+                            srca.push_back(src[ii]);
+                            dsta.push_back(dst[ii]);
+                        }
+                    vector<double> hhh=AjusteHomography(srca,dsta,paramIni);
+                    hh= (Mat_<double>(3,3) << hhh[0],hhh[1],hhh[2],hhh[3],hhh[4],hhh[5],0,0,1);
+                }
+                if (hh.empty() )
+                {
+                    hh = Mat::zeros(3,3,CV_64FC1);
+                    hh.at<double>(0,0)=1;
+                    hh.at<double>(0,1)=0;
+                    hh.at<double>(1,1)=1;
+                    hh.at<double>(1,0)=0;
+
+                }
+                cout << "Zone " << zone << "****Match :" << src.size()<<endl;
+                cout<<hh<<endl;
+                if (fHomography.is_open())
+                {
+                    fHomography<<hh<<"\n";
+                }
+                h.push_back(hh);
+                for (int ii = 0; ii <zone.height; ii++)
+                {
+                    if (ii+zone.y>=0 && ii+zone.y<mapX.rows)
+                    {
+                        float *ptrX = (float*)mapX.ptr(ii+zone.y)+zone.x;
+                        float *ptrY = (float*)mapY.ptr(ii+zone.y)+zone.x;
+                        for (int j = 0; j < zone.width; j++, ptrX++, ptrY++)
+                        {
+                            if (j+zone.x>=0 && j+zone.x<mapX.cols)
+                            {
+                                Mat p=(Mat_<double>(3,1)<<j+zone.x,ii+zone.y,1);
+                                Mat q=hh.inv()*p;
+                                *ptrX = q.at<double>(0,0)/q.at<double>(2,0);
+                                *ptrY = q.at<double>(1,0)/q.at<double>(2,0);
+                            }
                         }
                     }
                 }
             }
+            if (i==1)
+                remap(planDst[0],pTst[0],mapX,mapY, CV_INTER_CUBIC);
+            if (i==2)
+                remap(planDst[2],pTst[2],mapX,mapY, CV_INTER_CUBIC);
+
         }
-        if (i==1)
-            remap(planDst[0],pTst[0],mapX,mapY, CV_INTER_CUBIC);
-        if (i==2)
-            remap(planDst[2],pTst[2],mapX,mapY, CV_INTER_CUBIC);
+    }
+    else
+    {
+        Mat hh;
+        for (int i = 1; i < nbChannel; i++)
+        {
+            vector<Point2f> src,dst;
+            Mat ref;
+            int nbZoneX=3,nbZoneY=3;
+            int nbZone=nbZoneX*nbZoneY;
+            for (int j = 0; j < nbZoneX; j++)
+            {
+                for (int k = 0; k < nbZoneY; k++)
+                {
+                    Rect r(planDst[0].cols/6+static_cast<double>(j)*planDst[0].cols/2/nbZoneX,planDst[0].rows/6+static_cast<double>(k)*planDst[0].rows/2/nbZoneY,planDst[0].cols/6,planDst[0].rows/6);
+                    if (i==1)
+                        planDst[0](r).copyTo(ref);
+                    else
+                        planDst[2](r).copyTo(ref);
+                    src.push_back(MatchTemplate(ref, planDst[1], Point2f(0,0))+Point(r.x,r.y));
+                    dst.push_back(Point2f(r.x,r.y));
+                }
+
+            }
+            cout<<src<<endl;
+            cout<<dst<<endl;
+            //Mat h = findHomography(src,dst);
+            Mat h = getAffineTransform(src,dst);
+            for (int ii = 0; ii <mapX.rows; ii++)
+            {
+                float *ptrX = (float*)mapX.ptr(ii);
+                float *ptrY = (float*)mapY.ptr(ii);
+ /*               double dy =p[0].y+planDst[0].rows/4;
+                double dx =p[1].x+planDst[0].cols/4;*/
+                for (int j = 0; j < mapX.cols; j++, ptrX++, ptrY++)
+                {
+/*                    *ptrX = j+dx;
+                    *ptrY = ii+(dy);*/
+                    Mat p=(Mat_<double>(3,1)<<j,ii,1);
+                    Mat q=h*p;
+                    *ptrX = q.at<double>(0,0);
+                    *ptrY = q.at<double>(1,0);
+                    //*ptrX = q.at<double>(0,0)/q.at<double>(2,0);
+                    //*ptrY = q.at<double>(1,0)/q.at<double>(2,0);
+                }
+            }
+            if (i==1)
+                remap(planDst[0],pTst[0],mapX,mapY, CV_INTER_CUBIC);
+            if (i==2)
+                remap(planDst[2],pTst[2],mapX,mapY, CV_INTER_CUBIC);
+
+        }
 
     }
     pTst[1] = planDst[1];
@@ -969,18 +1330,15 @@ Mat JunoCam::MatchChannel(vector<Mat> planDst)
 
 int main (int argc,char **argv)
 {
-    if (argc != 2)
-    {
-        cout << "give folder name";
-        exit(-1);
-    }
-
+ 
     JunoCam juno;
     vector<String> filenames; 
     String folder(argv[1]); // again we are using the Opencv's embedded "String" class
-
+    char sdst[1024];
     glob(folder, filenames); // new function that does the job ;-)
-    for(size_t i = 0; i < filenames.size(); ++i)
+
+
+    for(size_t i = 0; i < filenames.size() ; ++i)
     {
         int posExt=filenames[i].find_last_of(".");
         int posFile=filenames[i].find_last_of("\\")+1;
@@ -997,16 +1355,19 @@ int main (int argc,char **argv)
             Mat r;
             if (juno.SetMat(src))
             {
+                juno.SetFileName(s);
 //            Mat r = ProcessRaw(src,0,81);
-              r =   juno.ExtractRaw(0,23);
+                r =   juno.ExtractRaw(0,23,false);
 //                r = juno.ProcessRaw(0,81);
-                imshow("Image",r);
+                if (!r.empty())
+                    imshow("Image",r);
 
             }
             else
                 cout << "Unknown format - File " << filenames[i] << "\n";
-            imwrite(s,r);
-            waitKey();
+            if (!r.empty())
+                imwrite(s,r);
+            waitKey(10);
 
         }
     }
